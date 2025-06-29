@@ -1,41 +1,91 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { Socket } from 'socket.io-client';
-import io from 'socket.io-client';
-
-interface User {
-    id: string;
-    username: string;
-    roles: any[];
-}
+import {
+  createContext,
+  useContext,
+  ReactNode,
+  useState,
+  useEffect,
+} from "react";
+import { AuthUser, User } from "../types";
+import {
+  getCurrentUser,
+  login as apiLogin,
+  register as apiRegister,
+} from "../api/auth";
+import { useNavigate } from "react-router-dom";
 
 interface AuthContextType {
-    user: User | null;
-    setUser: (user: User | null) => void;
-    socket: Socket;
+  user: AuthUser | null;
+  login: (data: { username: string; password: string }) => Promise<void>;
+  register: (data: {
+    username: string;
+    email: string;
+    password: string;
+  }) => Promise<void>;
+  logout: () => void;
+  hasPermission: (permission: string) => boolean;
 }
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-interface AuthProviderProps {
-    children: ReactNode;
-}
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const navigate = useNavigate();
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-    const [user, setUser] = useState<User | null>(null);
-    const socket: Socket = io('http://localhost:5000');
+  useEffect(() => {
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      setUser(currentUser);
+    }
+  }, []);
 
-    useEffect(() => {
-        // Check for existing token on mount
-        const token = localStorage.getItem('token');
-        if (token) {
-            // Optionally fetch user data to validate token
-            setUser(JSON.parse(localStorage.getItem('user') || '{}'));
-        }
-    }, []);
+  const login = async (data: { username: string; password: string }) => {
+    const authUser = await apiLogin(data);
+    console.log("authuser", authUser);
 
-    return (
-        <AuthContext.Provider value={{ user, setUser, socket }}>
-            {children}
-        </AuthContext.Provider>
+    localStorage.setItem("token", authUser.token);
+    localStorage.setItem("user", JSON.stringify(authUser));
+    setUser(authUser);
+    navigate("/dashboard");
+  };
+
+  const register = async (data: {
+    username: string;
+    email: string;
+    password: string;
+  }) => {
+    await apiRegister(data);
+    navigate("/login");
+  };
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setUser(null);
+    navigate("/login");
+  };
+
+  const hasPermission = (permission: string): boolean => {
+    if (!user) return false;
+    console.log("user", user);
+
+    return user?.roles.some((role) =>
+      role?.permissions.some((p) => p.name === permission)
     );
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{ user, login, register, logout, hasPermission }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
 };
